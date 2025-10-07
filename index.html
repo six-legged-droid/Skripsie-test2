@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Torque Wrench Live Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Chart.js (optional but nice) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+    th { background: #f6f6f6; text-align: left; }
+    #grid { margin-top: 24px; }
+    canvas { max-width: 900px; width: 100%; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <h1>Torque Wrench (device001)</h1>
+
+  <p>Status: <span id="status">initializing…</span></p>
+
+  <canvas id="torqueChart" height="220"></canvas>
+
+  <div id="grid">
+    <table id="dataTable">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Torque (Nm)</th>
+          <th>Temp (°C)</th>
+          <th>Battery (%)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <!-- Firebase v10 modular SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
+    import { getDatabase, ref, query, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-database.js";
+
+    // --------------- FILL THIS IN (from Firebase console web app config) ---------------
+    const firebaseConfig = {
+      apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
+      authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
+      databaseURL: "https://digital-torque-wrench-3e1f1-default-rtdb.firebaseio.com",
+      projectId: "digital-torque-wrench-3e1f1",
+      storageBucket: "digital-torque-wrench-3e1f1.firebasestorage.app",
+      messagingSenderId: "904327818991",
+      appId: "1:904327818991:web:7879859e48d07c74a1f51a"
+    };
+    // -----------------------------------------------------------------------------------
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db   = getDatabase(app);
+
+    const statusEl = document.getElementById('status');
+    const tbody = document.querySelector('#dataTable tbody');
+
+    // Chart.js setup
+    const ctx = document.getElementById('torqueChart').getContext('2d');
+    const torqueChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{ label: 'Torque (Nm)', data: [], borderWidth: 2, tension: 0.2 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { title: { display: true, text: 'Time' } },
+          y: { title: { display: true, text: 'Torque (Nm)' } }
+        }
+      }
+    });
+
+    function formatTs(ts) {
+      const d = new Date(ts * 1000);
+      return d.toLocaleString();
+    }
+
+    function renderRow(d) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${formatTs(d.ts)}</td>
+        <td>${(d.torque ?? '').toFixed?.(2) ?? d.torque}</td>
+        <td>${(d.temperature ?? '').toFixed?.(2) ?? d.temperature}</td>
+        <td>${(d.battery ?? '').toFixed?.(0) ?? d.battery}</td>
+      `;
+      return tr;
+    }
+
+    function updateChart(dataArr) {
+      const labels = dataArr.map(d => new Date(d.ts * 1000).toLocaleTimeString());
+      const values = dataArr.map(d => d.torque ?? null);
+      torqueChart.data.labels = labels;
+      torqueChart.data.datasets[0].data = values;
+      torqueChart.update();
+    }
+
+    // 1) Anonymous sign-in
+    signInAnonymously(auth).catch(err => {
+      statusEl.textContent = "Auth error: " + err.message;
+      console.error(err);
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        statusEl.textContent = "Connected (anonymous)";
+        // 2) Subscribe to last 50 readings
+        const q = query(ref(db, '/devices/device001/timeseries'), limitToLast(50));
+        onValue(q, (snap) => {
+          const rows = [];
+          snap.forEach(child => {
+            rows.push(child.val());
+          });
+          rows.sort((a,b) => (a.ts ?? 0) - (b.ts ?? 0));
+
+          // table
+          tbody.innerHTML = '';
+          rows.forEach(d => tbody.appendChild(renderRow(d)));
+
+          // chart
+          updateChart(rows);
+        }, (err) => {
+          statusEl.textContent = "DB error: " + err.message;
+        });
+      } else {
+        statusEl.textContent = "Auth: signed out";
+      }
+    });
+  </script>
+</body>
+</html>
