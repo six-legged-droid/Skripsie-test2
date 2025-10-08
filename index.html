@@ -101,7 +101,7 @@
 
       // Read from your actual path: /devices/device001/timeseries
       const qRef = query(
-        ref(db, "devices/device002/timeseries"),
+        ref(db, "devices/device001/timeseries"),
         orderByChild("timestamp"),
         limitToLast(500) // adjust if you want more/less rows
       );
@@ -118,5 +118,6 @@
   </script>
 </body>
 </html>
+
 
 
