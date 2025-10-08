@@ -1,48 +1,61 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Torque Wrench Live Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Chart.js (optional but nice) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Torque Logs</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-    th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
-    th { background: #f6f6f6; text-align: left; }
-    #grid { margin-top: 24px; }
-    canvas { max-width: 900px; width: 100%; margin-top: 24px; }
+    :root { --bg:#0b0f17; --card:#121826; --text:#e6eefc; --muted:#9fb0c9; }
+    body { margin:0; font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial;
+           background:var(--bg); color:var(--text); }
+    header { padding:24px; text-align:center; }
+    .card { max-width:1100px; margin:0 auto 40px; background:var(--card);
+            border-radius:18px; padding:18px 18px 8px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
+    table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    th, td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,.06); }
+    th { font-weight:600; color:var(--muted); letter-spacing:.02em; position:sticky; top:0; background:var(--card); }
+    tr.fail { background:#2b1010; }  /* red-tinted row for failures */
+    tr.fail td { color:#ffb3b3; }
+    .pill { padding:4px 8px; border-radius:999px; font-weight:600; font-size:12px; }
+    .ok { background:#15321c; color:#91f2a1; }
+    .bad { background:#3a1414; color:#ff9aa9; }
+    footer { color:var(--muted); text-align:center; padding:12px; }
   </style>
 </head>
 <body>
-  <h1>Torque Wrench (device001)</h1>
+  <header>
+    <h1>Digital Torque Wrench — Live Logs</h1>
+    <p id="status" style="color:#9fb0c9">Connecting…</p>
+  </header>
 
-  <p>Status: <span id="status">initializing…</span></p>
-
-  <canvas id="torqueChart" height="220"></canvas>
-
-  <div id="grid">
-    <table id="dataTable">
+  <main class="card">
+    <table id="logs">
       <thead>
         <tr>
-          <th>Time</th>
-          <th>Torque (Nm)</th>
-          <th>Temp (°C)</th>
-          <th>Battery (%)</th>
+          <th style="width:26%">Time (UTC)</th>
+          <th style="width:18%">Bolt</th>
+          <th style="width:18%">Torque (Nm)</th>
+          <th style="width:18%">Desired (Nm)</th>
+          <th style="width:20%">Result</th>
         </tr>
       </thead>
-      <tbody></tbody>
+      <tbody id="tbody">
+        <!-- rows injected here -->
+      </tbody>
     </table>
-  </div>
+  </main>
 
-  <!-- Firebase v10 modular SDKs -->
+  <footer>Powered by Firebase Realtime Database</footer>
+
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-    import { getDatabase, ref, query, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-database.js";
+    // Firebase v12 modular SDK via CDN
+    import { initializeApp }   from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged }
+                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
+                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 
-    // --------------- FILL THIS IN (from Firebase console web app config) ---------------
+    // Your Firebase web app config
     const firebaseConfig = {
       apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
       authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
@@ -52,88 +65,57 @@
       messagingSenderId: "904327818991",
       appId: "1:904327818991:web:7879859e48d07c74a1f51a"
     };
-    // -----------------------------------------------------------------------------------
 
+    // Init + Anonymous auth
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db   = getDatabase(app);
 
-    const statusEl = document.getElementById('status');
-    const tbody = document.querySelector('#dataTable tbody');
+    const $status = document.getElementById("status");
+    const $tbody  = document.getElementById("tbody");
 
-    // Chart.js setup
-    const ctx = document.getElementById('torqueChart').getContext('2d');
-    const torqueChart = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [{ label: 'Torque (Nm)', data: [], borderWidth: 2, tension: 0.2 }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { title: { display: true, text: 'Time' } },
-          y: { title: { display: true, text: 'Torque (Nm)' } }
-        }
-      }
-    });
-
-    function formatTs(ts) {
-      const d = new Date(ts * 1000);
-      return d.toLocaleString();
+    function num(n) { return (n === undefined || n === null || isNaN(n)) ? "" : Number(n).toFixed(2); }
+    function rowHtml(rec) {
+      const d = rec.timestamp ? new Date(rec.timestamp * 1000).toISOString().replace("T"," ").slice(0,19) : "";
+      const pass = !!rec.pass;
+      const pill = pass ? `<span class="pill ok">PASS</span>` : `<span class="pill bad">FAIL</span>`;
+      return `<tr class="${pass ? "" : "fail"}">
+        <td>${d}</td>
+        <td>${rec.bolt ?? ""}</td>
+        <td>${num(rec.torque)}</td>
+        <td>${num(rec.desired)}</td>
+        <td>${pill}</td>
+      </tr>`;
     }
 
-    function renderRow(d) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${formatTs(d.ts)}</td>
-        <td>${(d.torque ?? '').toFixed?.(2) ?? d.torque}</td>
-        <td>${(d.temperature ?? '').toFixed?.(2) ?? d.temperature}</td>
-        <td>${(d.battery ?? '').toFixed?.(0) ?? d.battery}</td>
-      `;
-      return tr;
+    function render(snapshot) {
+      const data = snapshot.val() || {};
+      const rows = Object.entries(data).map(([k,v]) => v)
+                     .sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+      $tbody.innerHTML = rows.map(rowHtml).join("");
     }
-
-    function updateChart(dataArr) {
-      const labels = dataArr.map(d => new Date(d.ts * 1000).toLocaleTimeString());
-      const values = dataArr.map(d => d.torque ?? null);
-      torqueChart.data.labels = labels;
-      torqueChart.data.datasets[0].data = values;
-      torqueChart.update();
-    }
-
-    // 1) Anonymous sign-in
-    signInAnonymously(auth).catch(err => {
-      statusEl.textContent = "Auth error: " + err.message;
-      console.error(err);
-    });
 
     onAuthStateChanged(auth, (user) => {
-      if (user) {
-        statusEl.textContent = "Connected (anonymous)";
-        // 2) Subscribe to last 50 readings
-        const q = query(ref(db, '/devices/device001/timeseries'), limitToLast(50));
-        onValue(q, (snap) => {
-          const rows = [];
-          snap.forEach(child => {
-            rows.push(child.val());
-          });
-          rows.sort((a,b) => (a.ts ?? 0) - (b.ts ?? 0));
+      if (!user) return;
+      $status.textContent = "Connected (anonymous). Listening for updates…";
 
-          // table
-          tbody.innerHTML = '';
-          rows.forEach(d => tbody.appendChild(renderRow(d)));
+      // Read from your actual path: /devices/device001/timeseries
+      const qRef = query(
+        ref(db, "devices/device001/timeseries"),
+        orderByChild("timestamp"),
+        limitToLast(500) // adjust if you want more/less rows
+      );
+      onValue(qRef, render, (err) => {
+        console.error(err);
+        $status.textContent = "Read failed: " + err.message;
+      });
+    });
 
-          // chart
-          updateChart(rows);
-        }, (err) => {
-          statusEl.textContent = "DB error: " + err.message;
-        });
-      } else {
-        statusEl.textContent = "Auth: signed out";
-      }
+    signInAnonymously(auth).catch(err => {
+      $status.textContent = "Anonymous sign-in failed: " + err.message;
+      console.error(err);
     });
   </script>
 </body>
 </html>
+
