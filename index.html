@@ -11,25 +11,17 @@
   h1 { margin:0 0 4px; font-weight:800; }
   #status { color:var(--muted) }
   .container { max-width:1200px; margin:0 auto 48px; padding:0 16px; }
-
-  /* KPIs */
   .kpis { display:grid; grid-template-columns: repeat(4,minmax(180px,1fr)); gap:12px; margin:12px 0 20px; }
   .kpi { background:var(--card); border-radius:14px; padding:14px 16px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
   .kpi h3 { margin:0 0 6px; font-size:12px; letter-spacing:.06em; color:var(--muted); font-weight:700; text-transform:uppercase; }
   .kpi .v { font-size:28px; font-weight:800; }
-
-  /* Controls */
   .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:10px 0 18px; }
   .controls .group { background:var(--card); border-radius:12px; padding:8px 10px; box-shadow:0 10px 24px rgba(0,0,0,.25); display:flex; gap:8px; align-items:center; }
   select, button { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
   button.primary { background:var(--accent); border:0; font-weight:700; }
-
-  /* Tabs */
   .tabs { display:flex; gap:8px; margin:6px 0 12px; }
   .tab { background:transparent; border:1px solid rgba(255,255,255,.2); color:var(--text); border-radius:999px; padding:6px 12px; cursor:pointer; }
   .tab.active { background:var(--accent); border-color:var(--accent); font-weight:700; }
-
-  /* Tables */
   .panel { background:var(--card); border-radius:16px; padding:12px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
   table { width:100%; border-collapse:collapse; }
   th, td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,.08); }
@@ -97,39 +89,36 @@
   <section id="panel_critical" class="panel">
     <div class="toolbar"><h3>Critical bolts</h3><span class="muted" id="c_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_critical"></tbody></table>
   </section>
 
   <section id="panel_failures" class="panel hide">
     <div class="toolbar"><h3>Failures</h3><span class="muted" id="f_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_fail"></tbody></table>
   </section>
 
   <section id="panel_all" class="panel hide">
     <div class="toolbar"><h3>All logs</h3><span class="muted" id="a_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_all"></tbody></table>
   </section>
 </main>
 
 <script type="module">
   // ======= CONFIG =======
-  // Mark which bolts are *critical* for QA attention
-  const CRITICAL_BOLTS = ["M10","M12"];               // <- change as needed
-  const DB_PATH = "devices/device001/timeseries";     // <- change if your path changes
+  const CRITICAL_BOLTS = ["M10","M12"];
+  const DB_PATH = "devices/device001/timeseries";
 
-  // Firebase v12 modular SDK via CDN
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
   import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
     from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 
-  // Your Firebase web app config
   const firebaseConfig = {
     apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
     authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
@@ -140,7 +129,6 @@
     appId: "1:904327818991:web:7879859e48d07c74a1f51a"
   };
 
-  // ======= Helpers =======
   const $ = (sel) => document.querySelector(sel);
   const $tbodyCritical = $("#tbody_critical");
   const $tbodyFail     = $("#tbody_fail");
@@ -157,15 +145,15 @@
     if (!r.pass) tr.classList.add("fail");
     tr.innerHTML = `<td>${when(r.timestamp)}</td>
                     <td>${r.bolt ?? ""}</td>
+                    <td>${r.grade ?? ""}</td>
                     <td>${fmt(r.torque)}</td>
                     <td>${fmt(r.desired)}</td>
                     <td>${r.pass ? '<span class="pill ok">PASS</span>' : '<span class="pill bad">FAIL</span>'}</td>`;
     return tr;
   };
 
-  // Filter utilities
   function hoursToCutoff(h) {
-    if (!h || Number(h)===0) return 0;          // 0 => All
+    if (!h || Number(h)===0) return 0;
     const now = Math.floor(Date.now()/1000);
     return now - Number(h)*3600;
   }
@@ -179,15 +167,15 @@
     });
   }
 
-  // CSV export
   function toCSV(rows) {
-    const header = ["timestamp","time_utc","bolt","torque","desired","pass"];
+    const header = ["timestamp","time_utc","bolt","grade","torque","desired","pass"];
     const lines = [header.join(",")];
     rows.forEach(r => {
       lines.push([
         r.timestamp||"",
         when(r.timestamp),
         r.bolt??"",
+        r.grade??"",
         (r.torque??""),
         (r.desired??""),
         r.pass ? "PASS" : "FAIL"
@@ -203,7 +191,6 @@
     URL.revokeObjectURL(url);
   }
 
-  // Tabs
   const tabBtns = document.querySelectorAll(".tab");
   function setTab(name){
     tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab===name));
@@ -212,15 +199,13 @@
   }
   tabBtns.forEach(b => b.addEventListener("click", ()=>setTab(b.dataset.tab)));
 
-  // ======= Firebase wiring =======
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getDatabase(app);
 
-  let FULL = [];   // all rows from DB (object array), newest last
+  let FULL = [];
 
   function render() {
-    // KPIs (all time, regardless of filters)
     const total = FULL.length;
     const fail  = FULL.filter(r => !r.pass).length;
     const pass  = total ? Math.round((1 - fail/total)*100) : 0;
@@ -231,71 +216,47 @@
     $kPass.textContent  = pass + "%";
     $kLastFail.textContent = lastFail ? when(lastFail.timestamp) : "—";
 
-    // Table data under current filters
     const FILT = applyFilters(FULL);
 
-    // Critical: only rows whose bolt is in CRITICAL_BOLTS
-    const CRIT = FILT.filter(r => CRITICAL_BOLTS.includes(r.bolt));
+    const CRIT = FILT.filter(r => ["M10","M12"].includes(r.bolt));
     $tbodyCritical.replaceChildren(...CRIT.map(rowEl));
     $cCount.textContent = `${CRIT.length} row${CRIT.length!==1?"s":""}`;
 
-    // Failures only
     const FAIL = FILT.filter(r => !r.pass);
     $tbodyFail.replaceChildren(...FAIL.map(rowEl));
     $fCount.textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
 
-    // All (filtered)
     $tbodyAll.replaceChildren(...FILT.map(rowEl));
     $aCount.textContent = `${FILT.length} row${FILT.length!==1?"s":""}`;
   }
 
   function onData(snap){
     const data = snap.val() || {};
-    // Flatten & sort by timestamp
     FULL = Object.values(data).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
     render();
   }
 
-  // React to filter changes
   $timeWindow.addEventListener("change", render);
   $boltFilter.addEventListener("change", render);
 
-  // CSV export (current visible tab’s rows)
   document.getElementById("exportCsv").addEventListener("click", ()=>{
-    let rows = [];
     const active = document.querySelector(".tab.active")?.dataset.tab || "critical";
-    if (active === "critical") rows = Array.from(document.querySelectorAll("#tbody_critical tr")).map(trToObj);
-    else if (active === "failures") rows = Array.from(document.querySelectorAll("#tbody_fail tr")).map(trToObj);
-    else rows = Array.from(document.querySelectorAll("#tbody_all tr")).map(trToObj);
-
-    // If we generated from DOM, rebuild rows from FULL under filters instead (gives clean numbers/time)
     const FILT = applyFilters(FULL);
-    if (active === "critical") rows = FILT.filter(r => CRITICAL_BOLTS.includes(r.bolt));
+    let rows = [];
+    if (active === "critical") rows = FILT.filter(r => ["M10","M12"].includes(r.bolt));
     if (active === "failures") rows = FILT.filter(r => !r.pass);
-    if (active === "all") rows = FILT;
-
+    if (active === "all")      rows = FILT;
     downloadCSV(`qc_${active}.csv`, toCSV(rows));
   });
-  function trToObj(tr){ // not used now (kept for reference)
-    const tds = tr.querySelectorAll("td");
-    return {
-      timestamp: 0,
-      bolt: tds[1]?.textContent.trim(),
-      torque: Number(tds[2]?.textContent),
-      desired: Number(tds[3]?.textContent),
-      pass: /PASS/.test(tds[4]?.textContent)
-    };
-  }
 
   onAuthStateChanged(auth, (user)=>{
     if (!user) return;
-    $status.textContent = "Connected (anonymous). Listening for updates…";
+    document.getElementById("status").textContent = "Connected (anonymous). Listening for updates…";
     const qRef = query(ref(db, DB_PATH), orderByChild("timestamp"), limitToLast(1000));
-    onValue(qRef, onData, (err)=>{ console.error(err); $status.textContent = "Read failed: " + err.message; });
+    onValue(qRef, onData, (err)=>{ console.error(err); document.getElementById("status").textContent = "Read failed: " + err.message; });
   });
-  signInAnonymously(auth).catch(e => { console.error(e); $status.textContent = "Anonymous sign-in failed: " + e.message; });
+  signInAnonymously(auth).catch(e => { console.error(e); document.getElementById("status").textContent = "Anonymous sign-in failed: " + e.message; });
 
-  // Default tab
   setTab("critical");
 </script>
 </body>
