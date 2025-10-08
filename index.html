@@ -1,123 +1,302 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Torque Logs</title>
-  <style>
-    :root { --bg:#0b0f17; --card:#121826; --text:#e6eefc; --muted:#9fb0c9; }
-    body { margin:0; font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial;
-           background:var(--bg); color:var(--text); }
-    header { padding:24px; text-align:center; }
-    .card { max-width:1100px; margin:0 auto 40px; background:var(--card);
-            border-radius:18px; padding:18px 18px 8px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
-    table { width:100%; border-collapse:collapse; table-layout:fixed; }
-    th, td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,.06); }
-    th { font-weight:600; color:var(--muted); letter-spacing:.02em; position:sticky; top:0; background:var(--card); }
-    tr.fail { background:#2b1010; }  /* red-tinted row for failures */
-    tr.fail td { color:#ffb3b3; }
-    .pill { padding:4px 8px; border-radius:999px; font-weight:600; font-size:12px; }
-    .ok { background:#15321c; color:#91f2a1; }
-    .bad { background:#3a1414; color:#ff9aa9; }
-    footer { color:var(--muted); text-align:center; padding:12px; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QC Dashboard — Torque Wrench</title>
+<style>
+  :root { --bg:#0b0f17; --card:#121826; --text:#e6eefc; --muted:#9fb0c9; --ok:#91f2a1; --bad:#ff9aa9; --accent:#3b82f6; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial; }
+  header { padding:20px 16px; }
+  h1 { margin:0 0 4px; font-weight:800; }
+  #status { color:var(--muted) }
+  .container { max-width:1200px; margin:0 auto 48px; padding:0 16px; }
+
+  /* KPIs */
+  .kpis { display:grid; grid-template-columns: repeat(4,minmax(180px,1fr)); gap:12px; margin:12px 0 20px; }
+  .kpi { background:var(--card); border-radius:14px; padding:14px 16px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
+  .kpi h3 { margin:0 0 6px; font-size:12px; letter-spacing:.06em; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  .kpi .v { font-size:28px; font-weight:800; }
+
+  /* Controls */
+  .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:10px 0 18px; }
+  .controls .group { background:var(--card); border-radius:12px; padding:8px 10px; box-shadow:0 10px 24px rgba(0,0,0,.25); display:flex; gap:8px; align-items:center; }
+  select, button { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
+  button.primary { background:var(--accent); border:0; font-weight:700; }
+
+  /* Tabs */
+  .tabs { display:flex; gap:8px; margin:6px 0 12px; }
+  .tab { background:transparent; border:1px solid rgba(255,255,255,.2); color:var(--text); border-radius:999px; padding:6px 12px; cursor:pointer; }
+  .tab.active { background:var(--accent); border-color:var(--accent); font-weight:700; }
+
+  /* Tables */
+  .panel { background:var(--card); border-radius:16px; padding:12px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,.08); }
+  th { color:var(--muted); font-weight:600; letter-spacing:.02em; background:var(--card); position:sticky; top:0; }
+  tr.fail { background:#2b1010; }
+  tr.fail td { color:#ffb3b3; }
+  .pill { padding:3px 8px; border-radius:999px; font-weight:700; font-size:12px; display:inline-block; }
+  .ok  { background:#15321c; color:var(--ok); }
+  .bad { background:#3a1414; color:var(--bad); }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin:0 0 8px; }
+  .muted { color:var(--muted) }
+  .hide { display:none; }
+</style>
 </head>
 <body>
-  <header>
-    <h1>Digital Torque Wrench — Live Logs</h1>
-    <p id="status" style="color:#9fb0c9">Connecting…</p>
-  </header>
+<header class="container">
+  <h1>QC Dashboard — device001</h1>
+  <p id="status">Connecting…</p>
+</header>
 
-  <main class="card">
-    <table id="logs">
-      <thead>
-        <tr>
-          <th style="width:26%">Time (UTC)</th>
-          <th style="width:18%">Bolt</th>
-          <th style="width:18%">Torque (Nm)</th>
-          <th style="width:18%">Desired (Nm)</th>
-          <th style="width:20%">Result</th>
-        </tr>
-      </thead>
-      <tbody id="tbody">
-        <!-- rows injected here -->
-      </tbody>
-    </table>
-  </main>
+<main class="container">
+  <!-- KPIs -->
+  <section class="kpis">
+    <div class="kpi"><h3>Total</h3><div class="v" id="k_total">0</div></div>
+    <div class="kpi"><h3>Pass Rate</h3><div class="v" id="k_pass">0%</div></div>
+    <div class="kpi"><h3>Failures</h3><div class="v" id="k_fail">0</div></div>
+    <div class="kpi"><h3>Last Fail</h3><div class="v" id="k_lastfail">—</div></div>
+  </section>
 
-  <footer>Powered by Firebase Realtime Database</footer>
+  <!-- Controls -->
+  <div class="controls">
+    <div class="group">
+      <span class="muted">Time window</span>
+      <select id="timeWindow">
+        <option value="1">Last 1h</option>
+        <option value="6">Last 6h</option>
+        <option value="24" selected>Last 24h</option>
+        <option value="168">Last 7d</option>
+        <option value="0">All</option>
+      </select>
+    </div>
+    <div class="group">
+      <span class="muted">Bolt</span>
+      <select id="boltFilter">
+        <option value="ALL" selected>All sizes</option>
+        <option value="M6">M6</option>
+        <option value="M8">M8</option>
+        <option value="M10">M10</option>
+        <option value="M12">M12</option>
+      </select>
+    </div>
+    <div class="group">
+      <button id="exportCsv">Export CSV (current view)</button>
+    </div>
+  </div>
 
-  <script type="module">
-    // Firebase v12 modular SDK via CDN
-    import { initializeApp }   from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged }
-                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-    import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
-                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="critical">Critical bolts</button>
+    <button class="tab" data-tab="failures">Failures</button>
+    <button class="tab" data-tab="all">All logs</button>
+  </div>
 
-    // Your Firebase web app config
-    const firebaseConfig = {
-      apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
-      authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
-      databaseURL: "https://digital-torque-wrench-3e1f1-default-rtdb.firebaseio.com",
-      projectId: "digital-torque-wrench-3e1f1",
-      storageBucket: "digital-torque-wrench-3e1f1.firebasestorage.app",
-      messagingSenderId: "904327818991",
-      appId: "1:904327818991:web:7879859e48d07c74a1f51a"
+  <!-- Panels -->
+  <section id="panel_critical" class="panel">
+    <div class="toolbar"><h3>Critical bolts</h3><span class="muted" id="c_count">0 rows</span></div>
+    <table><thead>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+    </thead><tbody id="tbody_critical"></tbody></table>
+  </section>
+
+  <section id="panel_failures" class="panel hide">
+    <div class="toolbar"><h3>Failures</h3><span class="muted" id="f_count">0 rows</span></div>
+    <table><thead>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+    </thead><tbody id="tbody_fail"></tbody></table>
+  </section>
+
+  <section id="panel_all" class="panel hide">
+    <div class="toolbar"><h3>All logs</h3><span class="muted" id="a_count">0 rows</span></div>
+    <table><thead>
+      <tr><th>Time (UTC)</th><th>Bolt</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+    </thead><tbody id="tbody_all"></tbody></table>
+  </section>
+</main>
+
+<script type="module">
+  // ======= CONFIG =======
+  // Mark which bolts are *critical* for QA attention
+  const CRITICAL_BOLTS = ["M10","M12"];               // <- change as needed
+  const DB_PATH = "devices/device001/timeseries";     // <- change if your path changes
+
+  // Firebase v12 modular SDK via CDN
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged }
+    from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+  import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
+    from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+
+  // Your Firebase web app config
+  const firebaseConfig = {
+    apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
+    authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
+    databaseURL: "https://digital-torque-wrench-3e1f1-default-rtdb.firebaseio.com",
+    projectId: "digital-torque-wrench-3e1f1",
+    storageBucket: "digital-torque-wrench-3e1f1.firebasestorage.app",
+    messagingSenderId: "904327818991",
+    appId: "1:904327818991:web:7879859e48d07c74a1f51a"
+  };
+
+  // ======= Helpers =======
+  const $ = (sel) => document.querySelector(sel);
+  const $tbodyCritical = $("#tbody_critical");
+  const $tbodyFail     = $("#tbody_fail");
+  const $tbodyAll      = $("#tbody_all");
+  const $status        = $("#status");
+  const $kTotal = $("#k_total"), $kPass = $("#k_pass"), $kFail = $("#k_fail"), $kLastFail = $("#k_lastfail");
+  const $cCount = $("#c_count"), $fCount = $("#f_count"), $aCount = $("#a_count");
+  const $timeWindow = $("#timeWindow"), $boltFilter = $("#boltFilter");
+
+  const fmt = (n) => (n===undefined || n===null || isNaN(n)) ? "" : Number(n).toFixed(2);
+  const when = (t) => t ? new Date(t*1000).toISOString().replace("T"," ").slice(0,19) : "";
+  const rowEl = (r) => {
+    const tr = document.createElement("tr");
+    if (!r.pass) tr.classList.add("fail");
+    tr.innerHTML = `<td>${when(r.timestamp)}</td>
+                    <td>${r.bolt ?? ""}</td>
+                    <td>${fmt(r.torque)}</td>
+                    <td>${fmt(r.desired)}</td>
+                    <td>${r.pass ? '<span class="pill ok">PASS</span>' : '<span class="pill bad">FAIL</span>'}</td>`;
+    return tr;
+  };
+
+  // Filter utilities
+  function hoursToCutoff(h) {
+    if (!h || Number(h)===0) return 0;          // 0 => All
+    const now = Math.floor(Date.now()/1000);
+    return now - Number(h)*3600;
+  }
+  function applyFilters(allRows) {
+    const bolt = $boltFilter.value;
+    const cutoff = hoursToCutoff($timeWindow.value);
+    return allRows.filter(r => {
+      if (bolt !== "ALL" && r.bolt !== bolt) return false;
+      if (cutoff && (r.timestamp||0) < cutoff) return false;
+      return true;
+    });
+  }
+
+  // CSV export
+  function toCSV(rows) {
+    const header = ["timestamp","time_utc","bolt","torque","desired","pass"];
+    const lines = [header.join(",")];
+    rows.forEach(r => {
+      lines.push([
+        r.timestamp||"",
+        when(r.timestamp),
+        r.bolt??"",
+        (r.torque??""),
+        (r.desired??""),
+        r.pass ? "PASS" : "FAIL"
+      ].join(","));
+    });
+    return lines.join("\n");
+  }
+  function downloadCSV(filename, text) {
+    const blob = new Blob([text], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Tabs
+  const tabBtns = document.querySelectorAll(".tab");
+  function setTab(name){
+    tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab===name));
+    document.querySelectorAll(".panel").forEach(p => p.classList.add("hide"));
+    document.querySelector("#panel_"+name).classList.remove("hide");
+  }
+  tabBtns.forEach(b => b.addEventListener("click", ()=>setTab(b.dataset.tab)));
+
+  // ======= Firebase wiring =======
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getDatabase(app);
+
+  let FULL = [];   // all rows from DB (object array), newest last
+
+  function render() {
+    // KPIs (all time, regardless of filters)
+    const total = FULL.length;
+    const fail  = FULL.filter(r => !r.pass).length;
+    const pass  = total ? Math.round((1 - fail/total)*100) : 0;
+    const lastFail = FULL.filter(r => !r.pass).slice(-1)[0];
+
+    $kTotal.textContent = total.toString();
+    $kFail.textContent  = fail.toString();
+    $kPass.textContent  = pass + "%";
+    $kLastFail.textContent = lastFail ? when(lastFail.timestamp) : "—";
+
+    // Table data under current filters
+    const FILT = applyFilters(FULL);
+
+    // Critical: only rows whose bolt is in CRITICAL_BOLTS
+    const CRIT = FILT.filter(r => CRITICAL_BOLTS.includes(r.bolt));
+    $tbodyCritical.replaceChildren(...CRIT.map(rowEl));
+    $cCount.textContent = `${CRIT.length} row${CRIT.length!==1?"s":""}`;
+
+    // Failures only
+    const FAIL = FILT.filter(r => !r.pass);
+    $tbodyFail.replaceChildren(...FAIL.map(rowEl));
+    $fCount.textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
+
+    // All (filtered)
+    $tbodyAll.replaceChildren(...FILT.map(rowEl));
+    $aCount.textContent = `${FILT.length} row${FILT.length!==1?"s":""}`;
+  }
+
+  function onData(snap){
+    const data = snap.val() || {};
+    // Flatten & sort by timestamp
+    FULL = Object.values(data).sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+    render();
+  }
+
+  // React to filter changes
+  $timeWindow.addEventListener("change", render);
+  $boltFilter.addEventListener("change", render);
+
+  // CSV export (current visible tab’s rows)
+  document.getElementById("exportCsv").addEventListener("click", ()=>{
+    let rows = [];
+    const active = document.querySelector(".tab.active")?.dataset.tab || "critical";
+    if (active === "critical") rows = Array.from(document.querySelectorAll("#tbody_critical tr")).map(trToObj);
+    else if (active === "failures") rows = Array.from(document.querySelectorAll("#tbody_fail tr")).map(trToObj);
+    else rows = Array.from(document.querySelectorAll("#tbody_all tr")).map(trToObj);
+
+    // If we generated from DOM, rebuild rows from FULL under filters instead (gives clean numbers/time)
+    const FILT = applyFilters(FULL);
+    if (active === "critical") rows = FILT.filter(r => CRITICAL_BOLTS.includes(r.bolt));
+    if (active === "failures") rows = FILT.filter(r => !r.pass);
+    if (active === "all") rows = FILT;
+
+    downloadCSV(`qc_${active}.csv`, toCSV(rows));
+  });
+  function trToObj(tr){ // not used now (kept for reference)
+    const tds = tr.querySelectorAll("td");
+    return {
+      timestamp: 0,
+      bolt: tds[1]?.textContent.trim(),
+      torque: Number(tds[2]?.textContent),
+      desired: Number(tds[3]?.textContent),
+      pass: /PASS/.test(tds[4]?.textContent)
     };
+  }
 
-    // Init + Anonymous auth
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db   = getDatabase(app);
+  onAuthStateChanged(auth, (user)=>{
+    if (!user) return;
+    $status.textContent = "Connected (anonymous). Listening for updates…";
+    const qRef = query(ref(db, DB_PATH), orderByChild("timestamp"), limitToLast(1000));
+    onValue(qRef, onData, (err)=>{ console.error(err); $status.textContent = "Read failed: " + err.message; });
+  });
+  signInAnonymously(auth).catch(e => { console.error(e); $status.textContent = "Anonymous sign-in failed: " + e.message; });
 
-    const $status = document.getElementById("status");
-    const $tbody  = document.getElementById("tbody");
-
-    function num(n) { return (n === undefined || n === null || isNaN(n)) ? "" : Number(n).toFixed(2); }
-    function rowHtml(rec) {
-      const d = rec.timestamp ? new Date(rec.timestamp * 1000).toISOString().replace("T"," ").slice(0,19) : "";
-      const pass = !!rec.pass;
-      const pill = pass ? `<span class="pill ok">PASS</span>` : `<span class="pill bad">FAIL</span>`;
-      return `<tr class="${pass ? "" : "fail"}">
-        <td>${d}</td>
-        <td>${rec.bolt ?? ""}</td>
-        <td>${num(rec.torque)}</td>
-        <td>${num(rec.desired)}</td>
-        <td>${pill}</td>
-      </tr>`;
-    }
-
-    function render(snapshot) {
-      const data = snapshot.val() || {};
-      const rows = Object.entries(data).map(([k,v]) => v)
-                     .sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
-      $tbody.innerHTML = rows.map(rowHtml).join("");
-    }
-
-    onAuthStateChanged(auth, (user) => {
-      if (!user) return;
-      $status.textContent = "Connected (anonymous). Listening for updates…";
-
-      // Read from your actual path: /devices/device001/timeseries
-      const qRef = query(
-        ref(db, "devices/device001/timeseries"),
-        orderByChild("timestamp"),
-        limitToLast(500) // adjust if you want more/less rows
-      );
-      onValue(qRef, render, (err) => {
-        console.error(err);
-        $status.textContent = "Read failed: " + err.message;
-      });
-    });
-
-    signInAnonymously(auth).catch(err => {
-      $status.textContent = "Anonymous sign-in failed: " + err.message;
-      console.error(err);
-    });
-  </script>
+  // Default tab
+  setTab("critical");
+</script>
 </body>
 </html>
-
-
-
