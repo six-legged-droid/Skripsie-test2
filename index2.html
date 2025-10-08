@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Torque Logs</title>
+  <style>
+    :root { --bg:#0b0f17; --card:#121826; --text:#e6eefc; --muted:#9fb0c9; }
+    body { margin:0; font:14px/1.4 system-ui,Segoe UI,Roboto,Helvetica,Arial;
+           background:var(--bg); color:var(--text); }
+    header { padding:24px; text-align:center; }
+    .card { max-width:1100px; margin:0 auto 40px; background:var(--card);
+            border-radius:18px; padding:18px 18px 8px; box-shadow:0 10px 24px rgba(0,0,0,.25); }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px 12px; text-align:left; border-bottom:1px solid rgba(255,255,255,.06); }
+    th { font-weight:600; color:var(--muted); letter-spacing:.02em; }
+    tr.fail { background: #2b1010; }     /* red-tinted row for failures */
+    tr.fail td { color: #ffb3b3; }
+    .pill { padding:4px 8px; border-radius:999px; font-weight:600; font-size:12px; }
+    .ok { background:#15321c; color:#91f2a1; }
+    .bad { background:#3a1414; color:#ff9aa9; }
+    footer { color:var(--muted); text-align:center; padding:12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Digital Torque Wrench — Live Logs</h1>
+    <p id="status" style="color:#9fb0c9">Connecting…</p>
+  </header>
+
+  <main class="card">
+    <table id="logs">
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Bolt</th>
+          <th>Torque (Nm)</th>
+          <th>Desired (Nm)</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <!-- rows injected here -->
+      </tbody>
+    </table>
+  </main>
+
+  <footer>Powered by Firebase Realtime Database</footer>
+
+  <script type="module">
+    // Use current CDN version for Firebase JS SDK (example shows 12.3.0)
+    // See release notes for the latest and update the version below if needed.
+    // https://www.npmjs.com/package/firebase  /  https://github.com/firebase/firebase-js-sdk/releases
+    import { initializeApp }   from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged }
+                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
+                               from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+
+    // 1) Your Firebase web app config (from Console → Project settings → Web app)
+     const firebaseConfig = {
+      apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
+      authDomain: "digital-torque-wrench-3e1f1.firebaseapp.com",
+      databaseURL: "https://digital-torque-wrench-3e1f1-default-rtdb.firebaseio.com",
+      projectId: "digital-torque-wrench-3e1f1",
+      storageBucket: "digital-torque-wrench-3e1f1.firebasestorage.app",
+      messagingSenderId: "904327818991",
+      appId: "1:904327818991:web:7879859e48d07c74a1f51a"
+    };
+
+    };
+
+    // 2) Init + Anonymous auth (recommended for read-only dashboards)
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db   = getDatabase(app);
+
+    const $status = document.getElementById("status");
+    const $tbody  = document.getElementById("tbody");
+
+    function fmt(n) { return Number(n).toFixed(2); }
+    function rowHtml(rec) {
+      const d = new Date((rec.timestamp || 0) * 1000).toISOString().replace("T"," ").slice(0,19);
+      const pass = !!rec.pass;
+      const pill = pass ? `<span class="pill ok">PASS</span>` : `<span class="pill bad">FAIL</span>`;
+      return `<tr class="${pass ? "" : "fail"}">
+        <td>${d}</td>
+        <td>${rec.bolt}</td>
+        <td>${fmt(rec.torque)}</td>
+        <td>${fmt(rec.desired)}</td>
+        <td>${pill}</td>
+      </tr>`;
+    }
+
+    function render(snapshot) {
+      const data = snapshot.val() || {};
+      // Convert the pushed children to array, newest last
+      const rows = Object.entries(data).map(([k,v]) => v)
+                     .sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+      $tbody.innerHTML = rows.map(rowHtml).join("");
+    }
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        $status.textContent = "Connected (anonymous). Listening for updates…";
+        // Get the latest 200 logs ordered by timestamp
+        const q = query(ref(db, "wrenchLogs"), orderByChild("timestamp"), limitToLast(200));
+        onValue(q, render);
+      } else {
+        $status.textContent = "Signed out";
+      }
+    });
+
+    // Start anonymous sign-in (enable in Console first)
+    signInAnonymously(auth).catch(err => {
+      $status.textContent = "Anonymous sign-in failed: " + err.message;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
