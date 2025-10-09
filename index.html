@@ -53,6 +53,7 @@
 
   <!-- Controls -->
   <div class="controls">
+    <div class="group"><input id="searchId" type="search" placeholder="Search Bolt ID" style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;color:var(--text);min-width:180px;"></div>
     <div class="group">
       <span class="muted">Time window</span>
       <select id="timeWindow">
@@ -89,21 +90,21 @@
   <section id="panel_critical" class="panel">
     <div class="toolbar"><h3>Critical bolts</h3><span class="muted" id="c_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_critical"></tbody></table>
   </section>
 
   <section id="panel_failures" class="panel hide">
     <div class="toolbar"><h3>Failures</h3><span class="muted" id="f_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_fail"></tbody></table>
   </section>
 
   <section id="panel_all" class="panel hide">
     <div class="toolbar"><h3>All logs</h3><span class="muted" id="a_count">0 rows</span></div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_all"></tbody></table>
   </section>
 </main>
@@ -137,6 +138,7 @@
   const $kTotal = $("#k_total"), $kPass = $("#k_pass"), $kFail = $("#k_fail"), $kLastFail = $("#k_lastfail");
   const $cCount = $("#c_count"), $fCount = $("#f_count"), $aCount = $("#a_count");
   const $timeWindow = $("#timeWindow"), $boltFilter = $("#boltFilter");
+  const $searchId = $("#searchId");
 
   const fmt = (n) => (n===undefined || n===null || isNaN(n)) ? "" : Number(n).toFixed(2);
   const when = (t) => t ? new Date(t*1000).toISOString().replace("T"," ").slice(0,19) : "";
@@ -144,6 +146,7 @@
     const tr = document.createElement("tr");
     if (!r.pass) tr.classList.add("fail");
     tr.innerHTML = `<td>${when(r.timestamp)}</td>
+                    <td>${r.boltId ?? ""}</td>
                     <td>${r.bolt ?? ""}</td>
                     <td>${r.grade ?? ""}</td>
                     <td>${fmt(r.torque)}</td>
@@ -160,20 +163,23 @@
   function applyFilters(allRows) {
     const bolt = $boltFilter.value;
     const cutoff = hoursToCutoff($timeWindow.value);
+    const q = ($searchId.value||"").trim();
     return allRows.filter(r => {
       if (bolt !== "ALL" && r.bolt !== bolt) return false;
       if (cutoff && (r.timestamp||0) < cutoff) return false;
+      if (q && String(r.boltId||"").indexOf(q) === -1) return false;
       return true;
     });
   }
 
   function toCSV(rows) {
-    const header = ["timestamp","time_utc","bolt","grade","torque","desired","pass"];
+    const header = ["timestamp","time_utc","boltId","bolt","grade","torque","desired","pass"];
     const lines = [header.join(",")];
     rows.forEach(r => {
       lines.push([
         r.timestamp||"",
         when(r.timestamp),
+        r.boltId??"",
         r.bolt??"",
         r.grade??"",
         (r.torque??""),
@@ -238,6 +244,7 @@
 
   $timeWindow.addEventListener("change", render);
   $boltFilter.addEventListener("change", render);
+  $searchId.addEventListener("input", render);
 
   document.getElementById("exportCsv").addEventListener("click", ()=>{
     const active = document.querySelector(".tab.active")?.dataset.tab || "critical";
