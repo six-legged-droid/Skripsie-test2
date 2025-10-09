@@ -17,7 +17,7 @@
   .kpi .v { font-size:28px; font-weight:800; }
   .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:10px 0 18px; }
   .controls .group { background:var(--card); border-radius:12px; padding:8px 10px; box-shadow:0 10px 24px rgba(0,0,0,.25); display:flex; gap:8px; align-items:center; }
-  select, button { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
+  select, button, input[type="text"], input[type="search"] { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
   button.primary { background:var(--accent); border:0; font-weight:700; }
   .tabs { display:flex; gap:8px; margin:6px 0 12px; }
   .tab { background:transparent; border:1px solid rgba(255,255,255,.2); color:var(--text); border-radius:999px; padding:6px 12px; cursor:pointer; }
@@ -34,11 +34,13 @@
   .toolbar { display:flex; justify-content:space-between; align-items:center; margin:0 0 8px; }
   .muted { color:var(--muted) }
   .hide { display:none; }
+  .small { font-size:12px; color:var(--muted); }
+  .badge { display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.2); margin-left:8px; }
 </style>
 </head>
 <body>
 <header class="container">
-  <h1>QC Dashboard — device001</h1>
+  <h1>QC Dashboard — device001 <span id="activeProjectBadge" class="badge"></span></h1>
   <p id="status">Connecting…</p>
 </header>
 
@@ -53,7 +55,18 @@
 
   <!-- Controls -->
   <div class="controls">
-    <div class="group"><input id="searchId" type="search" placeholder="Search Bolt ID" style="background:#0f172a;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;color:var(--text);min-width:180px;"></div>
+    <div class="group">
+      <span class="muted">Project</span>
+      <select id="projectSelect"><option value="ALL" selected>All projects</option></select>
+      <button id="setActiveProject" class="primary">Set Active on Device</button>
+    </div>
+    <div class="group">
+      <input id="newProjectName" type="text" placeholder="New project name">
+      <button id="createProject">Create Project</button>
+    </div>
+
+    <div class="group"><input id="searchId" type="search" placeholder="Search Bolt ID"></div>
+
     <div class="group">
       <span class="muted">Time window</span>
       <select id="timeWindow">
@@ -87,29 +100,40 @@
 
   <!-- Panels -->
   <section id="panel_failures" class="panel hide">
-    <div class="toolbar"><h3>Failures</h3><span class="muted" id="f_count">0 rows</span></div>
+    <div class="toolbar">
+      <h3>Failures</h3>
+      <span class="muted" id="f_count">0 rows</span>
+    </div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Project</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_fail"></tbody></table>
   </section>
 
   <section id="panel_all" class="panel">
-    <div class="toolbar"><h3>All logs</h3><span class="muted" id="a_count">0 rows</span></div>
+    <div class="toolbar">
+      <h3>All logs</h3>
+      <span class="muted" id="a_count">0 rows</span>
+    </div>
     <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
+      <tr><th>Time (UTC)</th><th>Project</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_all"></tbody></table>
+    <p class="small">Records without a projectId are shown as <em>Unassigned</em>.</p>
   </section>
 </main>
 
 <script type="module">
   // ======= CONFIG =======
-  const DB_PATH = "devices/device001/timeseries";
+  const DEVICE_ID = "device001";
+  const DB_PATH_TIMESERIES = `devices/${DEVICE_ID}/timeseries`;
+  const DB_PATH_DEVICE_CFG = `devices/${DEVICE_ID}/config`;
+  const DB_PATH_PROJECTS   = "projects";
 
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
   import { getAuth, signInAnonymously, onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-  import { getDatabase, ref, query, orderByChild, limitToLast, onValue }
-    from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
+  import {
+    getDatabase, ref, query, orderByChild, limitToLast, onValue, get, set, push, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyB5bM0ipakfKzlAxE588b9gUSBhAyJWOtM",
@@ -121,21 +145,33 @@
     appId: "1:904327818991:web:7879859e48d07c74a1f51a"
   };
 
+  // ======= UI handles =======
   const $ = (sel) => document.querySelector(sel);
+  const $status    = $("#status");
+  const $activeP   = $("#activeProjectBadge");
+
   const $tbodyFail = $("#tbody_fail");
   const $tbodyAll  = $("#tbody_all");
-  const $status    = $("#status");
   const $kTotal = $("#k_total"), $kPass = $("#k_pass"), $kFail = $("#k_fail"), $kLastFail = $("#k_lastfail");
   const $fCount = $("#f_count"), $aCount = $("#a_count");
+
   const $timeWindow = $("#timeWindow"), $boltFilter = $("#boltFilter");
   const $searchId = $("#searchId");
 
+  const $projectSelect = $("#projectSelect");
+  const $createProject = $("#createProject");
+  const $newProjectName = $("#newProjectName");
+  const $setActiveProject = $("#setActiveProject");
+
   const fmt = (n) => (n===undefined || n===null || isNaN(n)) ? "" : Number(n).toFixed(2);
   const when = (t) => t ? new Date(t*1000).toISOString().replace("T"," ").slice(0,19) : "";
-  const rowEl = (r) => {
+  const pname = (id, map) => (id && map[id]?.name) || (id ? id : "Unassigned");
+
+  const rowEl = (r, projectsMap) => {
     const tr = document.createElement("tr");
     if (!r.pass) tr.classList.add("fail");
     tr.innerHTML = `<td>${when(r.timestamp)}</td>
+                    <td>${pname(r.projectId, projectsMap)}</td>
                     <td>${r.boltId ?? ""}</td>
                     <td>${r.bolt ?? ""}</td>
                     <td>${r.grade ?? ""}</td>
@@ -150,25 +186,42 @@
     const now = Math.floor(Date.now()/1000);
     return now - Number(h)*3600;
   }
+
+  // State
+  let PROJECTS = {};           // {projectId: {name, createdAt}}
+  let ACTIVE_PROJECT = null;   // active project for the device (from /devices/.../config)
+  let FULL = [];
+
   function applyFilters(allRows) {
     const bolt = $boltFilter.value;
     const cutoff = hoursToCutoff($timeWindow.value);
     const q = ($searchId.value||"").trim();
+    const selectedProject = $projectSelect.value; // "ALL" or projectId or "UNASSIGNED"
+
     return allRows.filter(r => {
       if (bolt !== "ALL" && r.bolt !== bolt) return false;
       if (cutoff && (r.timestamp||0) < cutoff) return false;
       if (q && String(r.boltId||"").indexOf(q) === -1) return false;
+      if (selectedProject !== "ALL") {
+        if (selectedProject === "UNASSIGNED") {
+          if (r.projectId) return false;
+        } else {
+          if ((r.projectId||"") !== selectedProject) return false;
+        }
+      }
       return true;
     });
   }
 
   function toCSV(rows) {
-    const header = ["timestamp","time_utc","boltId","bolt","grade","torque","desired","pass"];
+    const header = ["timestamp","time_utc","projectId","projectName","boltId","bolt","grade","torque","desired","pass"];
     const lines = [header.join(",")];
     rows.forEach(r => {
       lines.push([
         r.timestamp||"",
         when(r.timestamp),
+        r.projectId||"",
+        pname(r.projectId, PROJECTS),
         r.boltId??"",
         r.bolt??"",
         r.grade??"",
@@ -178,13 +231,6 @@
       ].join(","));
     });
     return lines.join("\n");
-  }
-  function downloadCSV(filename, text) {
-    const blob = new Blob([text], {type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
   }
 
   const tabBtns = document.querySelectorAll(".tab");
@@ -199,8 +245,6 @@
   const auth = getAuth(app);
   const db   = getDatabase(app);
 
-  let FULL = [];
-
   function render() {
     const total = FULL.length;
     const fail  = FULL.filter(r => !r.pass).length;
@@ -212,13 +256,15 @@
     $kPass.textContent  = pass + "%";
     $kLastFail.textContent = lastFail ? when(lastFail.timestamp) : "—";
 
+    $activeP.textContent = ACTIVE_PROJECT ? `active project: ${pname(ACTIVE_PROJECT, PROJECTS)}` : "no active project";
+
     const FILT = applyFilters(FULL);
 
     const FAIL = FILT.filter(r => !r.pass);
-    $tbodyFail.replaceChildren(...FAIL.map(rowEl));
+    $tbodyFail.replaceChildren(...FAIL.map(r => rowEl(r, PROJECTS)));
     $fCount.textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
 
-    $tbodyAll.replaceChildren(...FILT.map(rowEl));
+    $tbodyAll.replaceChildren(...FILT.map(r => rowEl(r, PROJECTS)));
     $aCount.textContent = `${FILT.length} row${FILT.length!==1?"s":""}`;
   }
 
@@ -228,9 +274,58 @@
     render();
   }
 
-  $timeWindow.addEventListener("change", render);
-  $boltFilter.addEventListener("change", render);
-  $searchId.addEventListener("input", render);
+  function loadProjects() {
+    onValue(ref(db, DB_PATH_PROJECTS), (snap) => {
+      PROJECTS = snap.val() || {};
+      // rebuild select
+      const sel = $projectSelect;
+      const was = sel.value;
+      sel.innerHTML = '<option value="ALL">All projects</option><option value="UNASSIGNED">Unassigned</option>';
+      Object.entries(PROJECTS).forEach(([id, p])=>{
+        const opt = document.createElement("option");
+        opt.value = id; opt.textContent = p?.name || id;
+        sel.appendChild(opt);
+      });
+      // keep previous selection if possible
+      if ([...sel.options].some(o => o.value===was)) sel.value = was;
+      render();
+    });
+  }
+
+  async function loadActiveProject() {
+    try {
+      const snap = await get(ref(db, `${DB_PATH_DEVICE_CFG}/activeProject`));
+      ACTIVE_PROJECT = snap.val() || null;
+      render();
+    } catch (e) { console.error(e); }
+  }
+
+  $createProject.addEventListener("click", async ()=>{
+    const name = ($newProjectName.value||"").trim();
+    if (!name) return alert("Please enter a project name.");
+    try {
+      const keyRef = push(ref(db, DB_PATH_PROJECTS));
+      await set(keyRef, { name, createdAt: serverTimestamp() });
+      $newProjectName.value = "";
+    } catch (e) {
+      console.error(e);
+      alert("Failed to create project: " + e.message);
+    }
+  });
+
+  $setActiveProject.addEventListener("click", async ()=>{
+    const sel = $projectSelect.value;
+    if (sel==="ALL") return alert("Select a specific project or Unassigned.");
+    try {
+      await set(ref(db, `${DB_PATH_DEVICE_CFG}/activeProject`), (sel==="UNASSIGNED" ? null : sel));
+      ACTIVE_PROJECT = (sel==="UNASSIGNED" ? null : sel);
+      render();
+      alert("Active project updated for device.");
+    } catch (e) {
+      console.error(e);
+      alert("Failed to set active project: " + e.message);
+    }
+  });
 
   document.getElementById("exportCsv").addEventListener("click", ()=>{
     const active = document.querySelector(".tab.active")?.dataset.tab || "all";
@@ -241,14 +336,35 @@
     downloadCSV(`qc_${active}.csv`, toCSV(rows));
   });
 
-  onAuthStateChanged(auth, (user)=>{
-    if (!user) return;
-    document.getElementById("status").textContent = "Connected (anonymous). Listening for updates…";
-    const qRef = query(ref(db, DB_PATH), orderByChild("timestamp"), limitToLast(1000));
-    onValue(qRef, onData, (err)=>{ console.error(err); document.getElementById("status").textContent = "Read failed: " + err.message; });
-  });
-  signInAnonymously(auth).catch(e => { console.error(e); document.getElementById("status").textContent = "Anonymous sign-in failed: " + e.message; });
+  $timeWindow.addEventListener("change", render);
+  $boltFilter.addEventListener("change", render);
+  $searchId.addEventListener("input", render);
+  function downloadCSV(filename, text) {
+    const blob = new Blob([text], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
 
+  onAuthStateChanged(auth, async (user)=>{
+    if (!user) return;
+    $status.textContent = "Connected (anonymous). Listening for updates…";
+    const qRef = query(ref(db, DB_PATH_TIMESERIES), orderByChild("timestamp"), limitToLast(1000));
+    onValue(qRef, onData, (err)=>{ console.error(err); $status.textContent = "Read failed: " + err.message; });
+    await loadActiveProject();
+    loadProjects();
+  });
+  signInAnonymously(auth).catch(e => { console.error(e); $status.textContent = "Anonymous sign-in failed: " + e.message; });
+
+  // default tab
+  function downloadCSV(filename, text) {
+    const blob = new Blob([text], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
   setTab("all");
 </script>
 </body>
