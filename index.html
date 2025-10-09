@@ -17,7 +17,7 @@
   .kpi .v { font-size:28px; font-weight:800; }
   .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:10px 0 18px; }
   .controls .group { background:var(--card); border-radius:12px; padding:8px 10px; box-shadow:0 10px 24px rgba(0,0,0,.25); display:flex; gap:8px; align-items:center; }
-  select, button, input[type="text"], input[type="search"] { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
+  select, button, input[type="text"], input[type="search"], input[type="number"] { appearance:none; border:1px solid rgba(255,255,255,.12); background:#0f172a; color:var(--text); border-radius:8px; padding:8px 10px; }
   button.primary { background:var(--accent); border:0; font-weight:700; }
   .tabs { display:flex; gap:8px; margin:6px 0 12px; }
   .tab { background:transparent; border:1px solid rgba(255,255,255,.2); color:var(--text); border-radius:999px; padding:6px 12px; cursor:pointer; }
@@ -57,12 +57,21 @@
   <div class="controls">
     <div class="group">
       <span class="muted">Project</span>
-      <select id="projectSelect"><option value="ALL" selected>All projects</option></select>
+      <select id="projectSelect"><option value="ALL" selected>All projects</option><option value="UNASSIGNED">Unassigned</option></select>
+      <!-- Device activation not required anymore, but keep it if you still want to use it sometimes -->
       <button id="setActiveProject" class="primary">Set Active on Device</button>
     </div>
+
     <div class="group">
       <input id="newProjectName" type="text" placeholder="New project name">
       <button id="createProject">Create Project</button>
+    </div>
+
+    <!-- NEW: Project membership via Bolt IDs (for filtering without device activation) -->
+    <div class="group" id="boltMapGroup">
+      <input id="boltIdToMap" type="number" inputmode="numeric" placeholder="Bolt ID → Project">
+      <button id="addBoltToProject">Add</button>
+      <button id="removeBoltFromProject">Remove</button>
     </div>
 
     <div class="group"><input id="searchId" type="search" placeholder="Search Bolt ID"></div>
@@ -117,7 +126,7 @@
     <table><thead>
       <tr><th>Time (UTC)</th><th>Project</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
     </thead><tbody id="tbody_all"></tbody></table>
-    <p class="small">Records without a projectId are shown as <em>Unassigned</em>.</p>
+    <p class="small">Records without a projectId are shown as <em>Unassigned</em> unless their Bolt ID is mapped to a project here.</p>
   </section>
 </main>
 
@@ -132,7 +141,7 @@
   import { getAuth, signInAnonymously, onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
   import {
-    getDatabase, ref, query, orderByChild, limitToLast, onValue, get, set, push, serverTimestamp
+    getDatabase, ref, query, orderByChild, limitToLast, onValue, get, set, push, serverTimestamp, remove
   } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 
   const firebaseConfig = {
@@ -159,6 +168,10 @@
   const $createProject = $("#createProject");
   const $newProjectName = $("#newProjectName");
   const $setActiveProject = $("#setActiveProject");
+  const $boltIdToMap = $("#boltIdToMap");
+  const $addBoltToProject = $("#addBoltToProject");
+  const $removeBoltFromProject = $("#removeBoltFromProject");
+  const $boltMapGroup = $("#boltMapGroup");
 
   const fmt = (n) => (n===undefined || n===null || isNaN(n)) ? "" : Number(n).toFixed(2);
   const when = (t) => t ? new Date(t*1000).toISOString().replace("T"," ").slice(0,19) : "";
@@ -167,8 +180,9 @@
   const rowEl = (r, projectsMap) => {
     const tr = document.createElement("tr");
     if (!r.pass) tr.classList.add("fail");
+    const projName = pname(r.projectId, projectsMap);
     tr.innerHTML = `<td>${when(r.timestamp)}</td>
-                    <td>${pname(r.projectId, projectsMap)}</td>
+                    <td>${projName}</td>
                     <td>${r.boltId ?? ""}</td>
                     <td>${r.bolt ?? ""}</td>
                     <td>${r.grade ?? ""}</td>
@@ -185,9 +199,17 @@
   }
 
   // State
-  let PROJECTS = {};           // {projectId: {name, createdAt}}
+  let PROJECTS = {};           // {projectId: {name, createdAt, boltIds:{[boltId]:true}}}
   let ACTIVE_PROJECT = null;   // device's active project (nullable)
   let FULL = [];
+
+  function boltInProject(projectId, boltId) {
+    if (!projectId || boltId===undefined || boltId===null) return false;
+    const p = PROJECTS[projectId];
+    if (!p || !p.boltIds) return false;
+    const key = String(boltId);
+    return !!p.boltIds[key];
+  }
 
   function applyFilters(allRows) {
     const bolt = $boltFilter.value;
@@ -199,14 +221,18 @@
       if (bolt !== "ALL" && r.bolt !== bolt) return false;
       if (cutoff && (r.timestamp||0) < cutoff) return false;
       if (q && String(r.boltId||"").indexOf(q) === -1) return false;
-      if (selectedProject !== "ALL") {
-        if (selectedProject === "UNASSIGNED") {
-          if (r.projectId) return false;
-        } else {
-          if ((r.projectId||"") !== selectedProject) return false;
-        }
+
+      if (selectedProject === "ALL") return true;
+
+      if (selectedProject === "UNASSIGNED") {
+        // Not assigned on record and also not mapped by boltId to any project
+        const assigned = r.projectId ? true : false;
+        const mappedToAny = Object.keys(PROJECTS).some(pid => boltInProject(pid, r.boltId));
+        return !assigned && !mappedToAny;
       }
-      return true;
+
+      // Specific project: record belongs if (1) projectId is that project OR (2) its boltId is mapped to that project
+      return (r.projectId === selectedProject) || boltInProject(selectedProject, r.boltId);
     });
   }
 
@@ -214,11 +240,13 @@
     const header = ["timestamp","time_utc","projectId","projectName","boltId","bolt","grade","torque","desired","pass"];
     const lines = [header.join(",")];
     rows.forEach(r => {
+      const projectId = r.projectId || "";
+      const projectName = pname(r.projectId, PROJECTS) || "";
       lines.push([
         r.timestamp||"",
         when(r.timestamp),
-        r.projectId||"",
-        pname(r.projectId, PROJECTS),
+        projectId,
+        projectName,
         r.boltId??"",
         r.bolt??"",
         r.grade??"",
@@ -256,21 +284,26 @@
     const pass  = total ? Math.round((1 - fail/total)*100) : 0;
     const lastFail = FULL.filter(r => !r.pass).slice(-1)[0];
 
-    $kTotal.textContent = total.toString();
-    $kFail.textContent  = fail.toString();
-    $kPass.textContent  = pass + "%";
-    $kLastFail.textContent = lastFail ? when(lastFail.timestamp) : "—";
+    $("#k_total").textContent = total.toString();
+    $("#k_fail").textContent  = fail.toString();
+    $("#k_pass").textContent  = pass + "%";
+    $("#k_lastfail").textContent = lastFail ? when(lastFail.timestamp) : "—";
 
+    // Device active project still shown, but not required for viewing
     $activeP.textContent = ACTIVE_PROJECT ? `active project: ${pname(ACTIVE_PROJECT, PROJECTS)}` : "no active project";
+
+    // Show/Hide bolt mapping UI depending on selection
+    const sel = $projectSelect.value;
+    $boltMapGroup.style.display = (sel !== "ALL" && sel !== "UNASSIGNED") ? "flex" : "none";
 
     const FILT = applyFilters(FULL);
 
     const FAIL = FILT.filter(r => !r.pass);
     $tbodyFail.replaceChildren(...FAIL.map(r => rowEl(r, PROJECTS)));
-    $fCount.textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
+    $("#f_count").textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
 
     $tbodyAll.replaceChildren(...FILT.map(r => rowEl(r, PROJECTS)));
-    $aCount.textContent = `${FILT.length} row${FILT.length!==1?"s":""}`;
+    $("#a_count").textContent = `${FILT.length} row${FILT.length!==1?"s":""}`;
   }
 
   function onData(snap){
@@ -298,7 +331,6 @@
       },
       (err) => {
         console.error("Projects read failed:", err?.message);
-        // Keep UI usable even if projects are blocked by rules
         PROJECTS = {};
         const sel = $projectSelect;
         sel.innerHTML = '<option value="ALL">All projects</option><option value="UNASSIGNED">Unassigned</option>';
@@ -319,6 +351,7 @@
     }
   }
 
+  // Project management
   $createProject.addEventListener("click", async ()=>{
     const name = ($newProjectName.value||"").trim();
     if (!name) return alert("Please enter a project name.");
@@ -332,6 +365,7 @@
     }
   });
 
+  // Optional: still allow device to be set, but no longer required for viewing
   $setActiveProject.addEventListener("click", async ()=>{
     const sel = $projectSelect.value;
     if (sel==="ALL") return alert("Select a specific project or Unassigned.");
@@ -343,6 +377,35 @@
     } catch (e) {
       console.error(e);
       alert("Failed to set active project: " + e.message);
+    }
+  });
+
+  // NEW: map/unmap Bolt ID to selected project
+  $addBoltToProject.addEventListener("click", async ()=>{
+    const sel = $projectSelect.value;
+    if (sel==="ALL" || sel==="UNASSIGNED") return alert("Pick a specific project first.");
+    const boltId = ($boltIdToMap.value||"").trim();
+    if (!boltId) return alert("Enter a Bolt ID.");
+    try {
+      await set(ref(db, `${DB_PATH_PROJECTS}/${sel}/boltIds/${boltId}`), true);
+      $boltIdToMap.value = "";
+    } catch (e) {
+      console.error(e);
+      alert("Failed to add Bolt ID: " + e.message);
+    }
+  });
+
+  $removeBoltFromProject.addEventListener("click", async ()=>{
+    const sel = $projectSelect.value;
+    if (sel==="ALL" || sel==="UNASSIGNED") return alert("Pick a specific project first.");
+    const boltId = ($boltIdToMap.value||"").trim();
+    if (!boltId) return alert("Enter a Bolt ID to remove.");
+    try {
+      await remove(ref(db, `${DB_PATH_PROJECTS}/${sel}/boltIds/${boltId}`));
+      $boltIdToMap.value = "";
+    } catch (e) {
+      console.error(e);
+      alert("Failed to remove Bolt ID: " + e.message);
     }
   });
 
@@ -358,16 +421,17 @@
   $timeWindow.addEventListener("change", render);
   $boltFilter.addEventListener("change", render);
   $searchId.addEventListener("input", render);
+  $projectSelect.addEventListener("change", render);
 
   onAuthStateChanged(auth, async (user)=>{
     if (!user) return;
     $status.textContent = "Connected (anonymous). Listening for updates…";
 
-    // Timeseries listener (this is what matters for 'connecting')
+    // Timeseries
     const qRef = query(ref(db, DB_PATH_TIMESERIES), orderByChild("timestamp"), limitToLast(1000));
     onValue(qRef, onData, (err)=>{ console.error(err); $status.textContent = "Read failed: " + err.message; });
 
-    // These may fail with current rules; they are now safely wrapped.
+    // Load projects + optional device active project
     await loadActiveProject();
     loadProjects();
   });
