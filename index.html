@@ -81,19 +81,11 @@
 
   <!-- Tabs -->
   <div class="tabs">
-    <button class="tab active" data-tab="critical">Critical bolts</button>
     <button class="tab" data-tab="failures">Failures</button>
-    <button class="tab" data-tab="all">All logs</button>
+    <button class="tab active" data-tab="all">All logs</button>
   </div>
 
   <!-- Panels -->
-  <section id="panel_critical" class="panel">
-    <div class="toolbar"><h3>Critical bolts</h3><span class="muted" id="c_count">0 rows</span></div>
-    <table><thead>
-      <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
-    </thead><tbody id="tbody_critical"></tbody></table>
-  </section>
-
   <section id="panel_failures" class="panel hide">
     <div class="toolbar"><h3>Failures</h3><span class="muted" id="f_count">0 rows</span></div>
     <table><thead>
@@ -101,7 +93,7 @@
     </thead><tbody id="tbody_fail"></tbody></table>
   </section>
 
-  <section id="panel_all" class="panel hide">
+  <section id="panel_all" class="panel">
     <div class="toolbar"><h3>All logs</h3><span class="muted" id="a_count">0 rows</span></div>
     <table><thead>
       <tr><th>Time (UTC)</th><th>Bolt ID</th><th>Bolt</th><th>Grade</th><th>Torque (Nm)</th><th>Desired (Nm)</th><th>Result</th></tr>
@@ -111,7 +103,6 @@
 
 <script type="module">
   // ======= CONFIG =======
-  const CRITICAL_BOLTS = ["M10","M12"];
   const DB_PATH = "devices/device001/timeseries";
 
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
@@ -131,12 +122,11 @@
   };
 
   const $ = (sel) => document.querySelector(sel);
-  const $tbodyCritical = $("#tbody_critical");
-  const $tbodyFail     = $("#tbody_fail");
-  const $tbodyAll      = $("#tbody_all");
-  const $status        = $("#status");
+  const $tbodyFail = $("#tbody_fail");
+  const $tbodyAll  = $("#tbody_all");
+  const $status    = $("#status");
   const $kTotal = $("#k_total"), $kPass = $("#k_pass"), $kFail = $("#k_fail"), $kLastFail = $("#k_lastfail");
-  const $cCount = $("#c_count"), $fCount = $("#f_count"), $aCount = $("#a_count");
+  const $fCount = $("#f_count"), $aCount = $("#a_count");
   const $timeWindow = $("#timeWindow"), $boltFilter = $("#boltFilter");
   const $searchId = $("#searchId");
 
@@ -224,10 +214,6 @@
 
     const FILT = applyFilters(FULL);
 
-    const CRIT = FILT.filter(r => ["M10","M12"].includes(r.bolt));
-    $tbodyCritical.replaceChildren(...CRIT.map(rowEl));
-    $cCount.textContent = `${CRIT.length} row${CRIT.length!==1?"s":""}`;
-
     const FAIL = FILT.filter(r => !r.pass);
     $tbodyFail.replaceChildren(...FAIL.map(rowEl));
     $fCount.textContent = `${FAIL.length} row${FAIL.length!==1?"s":""}`;
@@ -247,10 +233,9 @@
   $searchId.addEventListener("input", render);
 
   document.getElementById("exportCsv").addEventListener("click", ()=>{
-    const active = document.querySelector(".tab.active")?.dataset.tab || "critical";
+    const active = document.querySelector(".tab.active")?.dataset.tab || "all";
     const FILT = applyFilters(FULL);
     let rows = [];
-    if (active === "critical") rows = FILT.filter(r => ["M10","M12"].includes(r.bolt));
     if (active === "failures") rows = FILT.filter(r => !r.pass);
     if (active === "all")      rows = FILT;
     downloadCSV(`qc_${active}.csv`, toCSV(rows));
@@ -264,7 +249,7 @@
   });
   signInAnonymously(auth).catch(e => { console.error(e); document.getElementById("status").textContent = "Anonymous sign-in failed: " + e.message; });
 
-  setTab("critical");
+  setTab("all");
 </script>
 </body>
 </html>
