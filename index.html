@@ -149,15 +149,12 @@
   const $ = (sel) => document.querySelector(sel);
   const $status    = $("#status");
   const $activeP   = $("#activeProjectBadge");
-
   const $tbodyFail = $("#tbody_fail");
   const $tbodyAll  = $("#tbody_all");
   const $kTotal = $("#k_total"), $kPass = $("#k_pass"), $kFail = $("#k_fail"), $kLastFail = $("#k_lastfail");
   const $fCount = $("#f_count"), $aCount = $("#a_count");
-
   const $timeWindow = $("#timeWindow"), $boltFilter = $("#boltFilter");
   const $searchId = $("#searchId");
-
   const $projectSelect = $("#projectSelect");
   const $createProject = $("#createProject");
   const $newProjectName = $("#newProjectName");
@@ -189,14 +186,14 @@
 
   // State
   let PROJECTS = {};           // {projectId: {name, createdAt}}
-  let ACTIVE_PROJECT = null;   // active project for the device (from /devices/.../config)
+  let ACTIVE_PROJECT = null;   // device's active project (nullable)
   let FULL = [];
 
   function applyFilters(allRows) {
     const bolt = $boltFilter.value;
     const cutoff = hoursToCutoff($timeWindow.value);
     const q = ($searchId.value||"").trim();
-    const selectedProject = $projectSelect.value; // "ALL" or projectId or "UNASSIGNED"
+    const selectedProject = $projectSelect.value; // "ALL" | "UNASSIGNED" | <projectId>
 
     return allRows.filter(r => {
       if (bolt !== "ALL" && r.bolt !== bolt) return false;
@@ -231,6 +228,14 @@
       ].join(","));
     });
     return lines.join("\n");
+  }
+
+  function downloadCSV(filename, text) {
+    const blob = new Blob([text], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
   }
 
   const tabBtns = document.querySelectorAll(".tab");
@@ -275,21 +280,31 @@
   }
 
   function loadProjects() {
-    onValue(ref(db, DB_PATH_PROJECTS), (snap) => {
-      PROJECTS = snap.val() || {};
-      // rebuild select
-      const sel = $projectSelect;
-      const was = sel.value;
-      sel.innerHTML = '<option value="ALL">All projects</option><option value="UNASSIGNED">Unassigned</option>';
-      Object.entries(PROJECTS).forEach(([id, p])=>{
-        const opt = document.createElement("option");
-        opt.value = id; opt.textContent = p?.name || id;
-        sel.appendChild(opt);
-      });
-      // keep previous selection if possible
-      if ([...sel.options].some(o => o.value===was)) sel.value = was;
-      render();
-    });
+    const projRef = ref(db, DB_PATH_PROJECTS);
+    onValue(
+      projRef,
+      (snap) => {
+        PROJECTS = snap.val() || {};
+        const sel = $projectSelect;
+        const was = sel.value;
+        sel.innerHTML = '<option value="ALL">All projects</option><option value="UNASSIGNED">Unassigned</option>';
+        Object.entries(PROJECTS).forEach(([id, p])=>{
+          const opt = document.createElement("option");
+          opt.value = id; opt.textContent = p?.name || id;
+          sel.appendChild(opt);
+        });
+        if ([...sel.options].some(o => o.value===was)) sel.value = was;
+        render();
+      },
+      (err) => {
+        console.error("Projects read failed:", err?.message);
+        // Keep UI usable even if projects are blocked by rules
+        PROJECTS = {};
+        const sel = $projectSelect;
+        sel.innerHTML = '<option value="ALL">All projects</option><option value="UNASSIGNED">Unassigned</option>';
+        render();
+      }
+    );
   }
 
   async function loadActiveProject() {
@@ -297,7 +312,11 @@
       const snap = await get(ref(db, `${DB_PATH_DEVICE_CFG}/activeProject`));
       ACTIVE_PROJECT = snap.val() || null;
       render();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.warn("Active project read failed:", e?.message);
+      ACTIVE_PROJECT = null;
+      render();
+    }
   }
 
   $createProject.addEventListener("click", async ()=>{
@@ -339,32 +358,25 @@
   $timeWindow.addEventListener("change", render);
   $boltFilter.addEventListener("change", render);
   $searchId.addEventListener("input", render);
-  function downloadCSV(filename, text) {
-    const blob = new Blob([text], {type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
 
   onAuthStateChanged(auth, async (user)=>{
     if (!user) return;
     $status.textContent = "Connected (anonymous). Listening for updates…";
+
+    // Timeseries listener (this is what matters for 'connecting')
     const qRef = query(ref(db, DB_PATH_TIMESERIES), orderByChild("timestamp"), limitToLast(1000));
     onValue(qRef, onData, (err)=>{ console.error(err); $status.textContent = "Read failed: " + err.message; });
+
+    // These may fail with current rules; they are now safely wrapped.
     await loadActiveProject();
     loadProjects();
   });
-  signInAnonymously(auth).catch(e => { console.error(e); $status.textContent = "Anonymous sign-in failed: " + e.message; });
 
-  // default tab
-  function downloadCSV(filename, text) {
-    const blob = new Blob([text], {type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  }
+  signInAnonymously(auth).catch(e => {
+    console.error(e);
+    $status.textContent = "Anonymous sign-in failed: " + e.message;
+  });
+
   setTab("all");
 </script>
 </body>
